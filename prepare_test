@@ -1,0 +1,5 @@
+#!/bin/bash
+
+dd if=/dev/urandom of=data/100M.dummy bs=1M count=100
+dd if=/dev/urandom of=data/1G.dummy bs=1M count=1000
+dd if=/dev/urandom of=data/10G.dummy bs=1M count=10000
