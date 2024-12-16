@@ -3,7 +3,7 @@ index/
 /bazel-*
 # Ignore Bazel verbose explanations
 --verbose_explanations
-data/
 external
 compile_commands.json
 MODULE.bazel.lock
+*.dummy
