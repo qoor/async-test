@@ -1,15 +1,17 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <future>
+#include <memory>
 #include <string>
 #include <thread>
-#include <utility>
 #include <vector>
 
+#include "async/server.h"
 #include "async/test_timer.h"
-#include "boost/asio.hpp"
+#include "boost/asio/thread_pool.hpp"
 
 namespace {
 
@@ -20,13 +22,13 @@ int DelayedSum(int value) {
   return value + 9999;
 }
 
-int ReadBigFile(const std::string& path) {
-  std::ifstream file(path);
+int ReadBigFile(const std::string* path) {
+  std::ifstream file(*path);
   if (!file.is_open()) {
     return -1;
   }
 
-  printf("Reading file %s...\n", path.c_str());
+  printf("Reading file %s...\n", path->c_str());
 
   std::string line;
   std::string::size_type size = 0;
@@ -39,116 +41,274 @@ int ReadBigFile(const std::string& path) {
   return size;
 }
 
-void AcceptHandler(boost::system::error_code error) {
-  if (error) {
-    printf("Failed to accept the client\n");
-  }
-}
-
-void ConnectHandler(boost::system::error_code error) {
-  if (error) {
-    printf("Failed to connect to the server\n");
-  }
-}
-
-std::pair<boost::asio::ip::tcp::socket, boost::asio::ip::tcp::socket>
-GetEchoServerAndClient(boost::asio::io_context& io) {
-  boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::tcp::v4(), 7696);
-  boost::asio::ip::tcp::acceptor acceptor(io, endpoint);
-  boost::asio::ip::tcp::socket accepted_client(io);
-
-  acceptor.listen();
-
-  boost::asio::ip::tcp::socket client(io);
-  boost::asio::ip::tcp::resolver resolver(io);
-
-  client.async_connect(resolver.resolve("127.0.0.1", "7696")->endpoint(),
-                       ConnectHandler);
-  acceptor.async_accept(accepted_client, AcceptHandler);
-
-  return std::make_pair(std::move(accepted_client), std::move(client));
+int ReadPacketFromSession(Session* session) {
+  std::string data;
+  printf("Read %lu bytes\n", session->Read(data));
+  return 0;
 }
 
 }  // namespace
 
-int main() {
-  TimerTest timer;
+namespace {
 
-  boost::asio::io_context io;
-  GetEchoServerAndClient(io);
+void SyncDelayedSumTest() {
+  printf("Starting sync delayed sum test...\n");
+
+  TestTimer timer;  // test start
+
+  printf("result = %d\n", DelayedSum(1));
+  printf("result = %d\n", DelayedSum(90001));
+
+  TestAnalyzer::GetInstance().FinishedTest(0, timer);  // test end
+}
+
+void AsyncDelayedSumTest() {
+  std::vector<std::future<int>> tests;
+
+  printf("Starting async delayed sum test...\n");
+
+  TestTimer timer;  // test start
+
+  tests.emplace_back(std::async(std::launch::async, DelayedSum, 1));
+  tests.emplace_back(std::async(std::launch::async, DelayedSum, 90001));
+
+  for (auto& test : tests) {
+    printf("result = %d\n", test.get());
+  }
+
+  TestAnalyzer::GetInstance().FinishedTest(1, timer);  // test end
+}
+
+void SyncBigFileReadAndDelayedSumTest(const std::string& file_path) {
+  printf("Starting sync file read + delayed sum test...\n");
+
+  TestTimer timer;  // test start
+
+  if (!ReadBigFile(&file_path)) {
+    printf("Failed to open file: %s\n", file_path.c_str());
+  } else {
+    DelayedSum(1);
+    ReadBigFile(&file_path);
+    DelayedSum(90001);
+
+    TestAnalyzer::GetInstance().FinishedTest(2, timer);  // test end
+  }
+}
+
+void AsyncBigFileReadAndDelayedSumTest(const std::string& file_path) {
+  std::vector<std::future<int>> tests;
+
+  printf("Starting async file read + delayed sum test...\n");
+
+  TestTimer timer;  // test start
+
+  tests.emplace_back(std::async(std::launch::async, ReadBigFile, &file_path));
+  tests.emplace_back(std::async(std::launch::async, DelayedSum, 1));
+  tests.emplace_back(std::async(std::launch::async, ReadBigFile, &file_path));
+  tests.emplace_back(std::async(std::launch::async, DelayedSum, 90001));
+
+  for (auto& test : tests) {
+    test.get();
+  }
+
+  TestAnalyzer::GetInstance().FinishedTest(3, timer);  // test end
+}
+
+void SyncTcpPacketReadTest(Server& server,
+                           int num_tcp_clients,
+                           const std::string& file_path) {
+  std::string data;
+
+  server.Listen();
+  printf("Waiting for new client...\n");
+
+  std::vector<std::unique_ptr<Session>> sessions =
+      server.AcceptNumClients(num_tcp_clients);
+  server.Close();
+
+  printf("\nStarting sync TCP packet read + file read + delayed sum test...\n");
+
+  TestTimer timer;  // test start
+
+  ReadBigFile(&file_path);
+  DelayedSum(1);
+
+  for (std::unique_ptr<Session>& session : sessions) {
+    ReadPacketFromSession(session.get());
+  }
+
+  ReadBigFile(&file_path);
+  DelayedSum(90001);
+
+  TestAnalyzer::GetInstance().FinishedTest(4, timer);  // test end
+}
+
+void AsyncTcpPacketReadTest(Server& server,
+                            int num_tcp_clients,
+                            const std::string& file_path) {
+  server.Listen();
+  printf("Waiting for new client...\n");
+
+  std::vector<std::unique_ptr<Session>> sessions =
+      server.AcceptNumClients(num_tcp_clients);
+  LaunchClient(num_tcp_clients);
+  server.Close();
+  std::vector<std::future<int>> tests;
+
+  printf(
+      "\nStarting async TCP packet read + file read + delayed sum test...\n");
+
+  TestTimer timer;  // test start
+
+  tests.emplace_back(std::async(std::launch::async, ReadBigFile, &file_path));
+  tests.emplace_back(std::async(std::launch::async, DelayedSum, 1));
+
+  for (std::unique_ptr<Session>& session : sessions) {
+    std::string data;
+    tests.emplace_back(
+        std::async(std::launch::async, ReadPacketFromSession, session.get()));
+  }
+
+  tests.emplace_back(std::async(std::launch::async, ReadBigFile, &file_path));
+  tests.emplace_back(std::async(std::launch::async, DelayedSum, 90001));
+
+  for (auto& reader : tests) {
+    reader.get();
+  }
+
+  TestAnalyzer::GetInstance().FinishedTest(5, timer);  // test end
+}
+
+void AsioTcpPacketReadTest(Server& server,
+                           int num_tcp_clients,
+                           const std::string& file_path,
+                           boost::asio::io_context& io) {
+  server.Listen();
+  printf("Waiting for new client...\n");
+
+  std::vector<std::unique_ptr<Session>> sessions =
+      server.AcceptNumClients(num_tcp_clients);
+  LaunchClient(num_tcp_clients);
+  server.Close();
+  std::vector<std::future<int>> readers;
+
+  printf(
+      "\nStarting Boost.Asio single threaded TCP packet read + file read + "
+      "delayed sum test...\n");
+
+  TestTimer timer;  // test timer
+
+  boost::asio::post(io, [&file_path] { ReadBigFile(&file_path); });
+  boost::asio::post(io, [] { DelayedSum(1); });
+
+  for (std::unique_ptr<Session>& session : sessions) {
+    std::string data;
+    boost::asio::post(io, [&session] { ReadPacketFromSession(session.get()); });
+  }
+
+  boost::asio::post(io, [&file_path] { ReadBigFile(&file_path); });
+  boost::asio::post(io, [] { DelayedSum(90001); });
+
   io.run();
+
+  TestAnalyzer::GetInstance().FinishedTest(6, timer);  // test end
+}
+
+void AsioMtTcpPacketReadTest(Server& server,
+                             int num_tcp_clients,
+                             const std::string& file_path,
+                             boost::asio::io_context& io) {
+  server.Listen();
+  printf("Waiting for new client...\n");
+
+  std::vector<std::unique_ptr<Session>> sessions =
+      server.AcceptNumClients(num_tcp_clients);
+  LaunchClient(num_tcp_clients);
+  server.Close();
+  std::vector<std::future<int>> readers;
+
+  printf(
+      "\nStarting Boost.Asio multi threaded TCP packet read + file read + "
+      "delayed sum test...\n");
+
+  boost::asio::thread_pool tp;
+
+  TestTimer timer;
+
+  boost::asio::post(tp, [&file_path] { ReadBigFile(&file_path); });
+  boost::asio::post(tp, [] { DelayedSum(1); });
+
+  for (std::unique_ptr<Session>& session : sessions) {
+    std::string data;
+    boost::asio::post(tp, [&session] { ReadPacketFromSession(session.get()); });
+  }
+
+  boost::asio::post(tp, [&file_path] { ReadBigFile(&file_path); });
+  boost::asio::post(tp, [] { DelayedSum(1); });
+
+  tp.join();
+
+  TestAnalyzer::GetInstance().FinishedTest(7, timer);  // test end
+}
+
+}  // namespace
+
+int main(int argc, char* argv[]) {
+  TestTimer timer;
+
+  int test_count = 1;
+  if (argc >= 2) {
+    test_count = atoi(argv[1]);
+  }
+
+  int num_tcp_clients = 1;
+  if (argc >= 3) {
+    num_tcp_clients = atoi(argv[2]);
+  }
+
+  std::string file_path = kTestFilePath;
+
+  TestAnalyzer::GetInstance().SetNumTestCases(8);
 
   printf("Starting tests...\n\n");
 
-  // sync delayed sum test
-  {
-    printf("Starting sync delayed sum test...\n");
-    timer.Reset();  // test start
+  for (int i = 0; i < test_count; ++i) {
+    // sync delayed sum test
+    SyncDelayedSumTest();
 
-    printf("result = %d\n", DelayedSum(1));
-    printf("result = %d\n", DelayedSum(90001));
+    // async delayed sum test
+    AsyncDelayedSumTest();
 
-    printf("%lldms\n\n", timer.ElapsedInMilliseconds());  // test end
-  }
+    // sync file read + delayed sum test
+    SyncBigFileReadAndDelayedSumTest(file_path);
 
-  // async delayed sum test
-  {
-    std::vector<std::future<int>> tests;
+    // async file read + delayed sum test
+    AsyncBigFileReadAndDelayedSumTest(file_path);
 
-    printf("Starting async delayed sum test...\n");
+    boost::asio::io_context io;
+    Server server(io, 7696);
 
-    timer.Reset();  // test start
+    // sync TCP packet read + file read + delayed sum test
+    SyncTcpPacketReadTest(server, num_tcp_clients, file_path);
 
-    tests.emplace_back(std::async(std::launch::async, DelayedSum, 1));
-    tests.emplace_back(std::async(std::launch::async, DelayedSum, 90001));
+    // async TCP packet read
+    AsyncTcpPacketReadTest(server, num_tcp_clients, file_path);
 
-    for (auto& test : tests) {
-      printf("result = %d\n", test.get());
-    }
+    // Boost.Asio single threaded async TCP packet read + file read +
+    // delayed sum test
+    AsioTcpPacketReadTest(server, num_tcp_clients, file_path, io);
 
-    printf("%lldms\n\n", timer.ElapsedInMilliseconds());  // test end
-  }
-
-  // sync file read + delayed sum test
-  {
-    std::string path = kTestFilePath;
-
-    printf("Starting sync file read + delayed sum test...\n");
-
-    timer.Reset();
-
-    if (!ReadBigFile(path)) {
-      printf("Failed to open file: %s\n", path.c_str());
-    } else {
-      DelayedSum(1);
-      ReadBigFile(path);
-      DelayedSum(90001);
-
-      printf("%lldms\n\n", timer.ElapsedInMilliseconds());
-    }
-  }
-
-  // async file read + delayed sum test
-  {
-    std::string path = kTestFilePath;
-    std::vector<std::future<int>> tests;
-
-    printf("Starting async file read + delayed sum test...\n");
-
-    timer.Reset();
-
-    tests.emplace_back(std::async(std::launch::async, ReadBigFile, path));
-    tests.emplace_back(std::async(std::launch::async, DelayedSum, 1));
-    tests.emplace_back(std::async(std::launch::async, ReadBigFile, path));
-    tests.emplace_back(std::async(std::launch::async, DelayedSum, 90001));
-
-    for (auto& test : tests) {
-      test.get();
-    }
-
-    printf("%lldms\n\n", timer.ElapsedInMilliseconds());
+    // Boost.Asio multi threaded async TCP packet read + file read +
+    // delayed sum test
+    AsioMtTcpPacketReadTest(server, num_tcp_clients, file_path, io);
   }
 
   printf("Finished all tests.\n");
+
+  for (int i = 0; i < 10; ++i) {
+    printf("\n");
+  }
+
+  TestAnalyzer::GetInstance().PrintAll();
   return EXIT_SUCCESS;
 }
