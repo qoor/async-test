@@ -268,47 +268,47 @@ int main(int argc, char* argv[]) {
 
   std::string file_path = kTestFilePath;
 
-  TestAnalyzer::GetInstance().SetNumTestCases(8);
-
   printf("Starting tests...\n\n");
 
   for (int i = 0; i < test_count; ++i) {
-    // sync delayed sum test
-    SyncDelayedSumTest();
+    TestAnalyzer::GetInstance().SetNumTestCases(8);
 
-    // async delayed sum test
-    AsyncDelayedSumTest();
-
-    // sync file read + delayed sum test
-    SyncBigFileReadAndDelayedSumTest(file_path);
-
-    // async file read + delayed sum test
-    AsyncBigFileReadAndDelayedSumTest(file_path);
+    // // sync delayed sum test
+    // SyncDelayedSumTest();
+    //
+    // // async delayed sum test
+    // AsyncDelayedSumTest();
+    //
+    // // sync file read + delayed sum test
+    // SyncBigFileReadAndDelayedSumTest(file_path);
+    //
+    // // async file read + delayed sum test
+    // AsyncBigFileReadAndDelayedSumTest(file_path);
 
     boost::asio::io_context io;
     Server server(io, 7696);
 
-    // sync TCP packet read + file read + delayed sum test
-    SyncTcpPacketReadTest(server, num_tcp_clients, file_path);
-
-    // async TCP packet read
-    AsyncTcpPacketReadTest(server, num_tcp_clients, file_path);
-
-    // Boost.Asio single threaded async TCP packet read + file read +
-    // delayed sum test
-    AsioTcpPacketReadTest(server, num_tcp_clients, file_path, io);
-
+    // // sync TCP packet read + file read + delayed sum test
+    // SyncTcpPacketReadTest(server, num_tcp_clients, file_path);
+    //
+    // // async TCP packet read
+    // AsyncTcpPacketReadTest(server, num_tcp_clients, file_path);
+    //
+    // // Boost.Asio single threaded async TCP packet read + file read +
+    // // delayed sum test
+    // AsioTcpPacketReadTest(server, num_tcp_clients, file_path, io);
+    //
     // Boost.Asio multi threaded async TCP packet read + file read +
     // delayed sum test
     AsioMtTcpPacketReadTest(server, num_tcp_clients, file_path, io);
+
+    for (int i = 0; i < 10; ++i) {
+      printf("\n");
+    }
+
+    TestAnalyzer::GetInstance().PrintAll();
   }
 
   printf("Finished all tests.\n");
-
-  for (int i = 0; i < 10; ++i) {
-    printf("\n");
-  }
-
-  TestAnalyzer::GetInstance().PrintAll();
   return EXIT_SUCCESS;
 }

@@ -1,8 +1,12 @@
 #ifndef ASYNC_SERVER_H_
 #define ASYNC_SERVER_H_
 
+#include <sys/socket.h>
+
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
+#include <exception>
 #include <memory>
 #include <string>
 #include <thread>
@@ -61,24 +65,30 @@ class Session {
 class Server {
  public:
   Server(boost::asio::io_context& io, int port)
-      : acceptor_(io),
+      : io_(io),
+        acceptor_(io),
         endpoint_(
             boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)) {}
 
   std::vector<std::unique_ptr<Session>> AcceptNumClients(int clients) {
     std::vector<std::unique_ptr<Session>> sessions;
-    std::vector<std::thread> threads;
+    std::thread thread([&] {
+      for (int i = 0; i < clients; ++i) {
+        printf("Waiting for client id: %d\n", i);
+        sessions.emplace_back(Accept());
+        // sessions.emplace_back(Accept());
+      }
+    });
 
-    for (int i = 0; i < clients; ++i) {
-      printf("Waiting for client id: %d\n", i);
-      threads.emplace_back([&] { sessions.emplace_back(Accept()); });
-      // printf("Success to accept client id: %d\n", i);
+    if (!LaunchClient(clients)) {
+      printf("Failed to launch clients\n");
+      sessions.clear();
     }
 
-    LaunchClient(clients);
-
-    for (std::thread& thread : threads) {
+    try {
       thread.join();
+    } catch (const std::exception& e) {
+      // nothing
     }
 
     return sessions;
@@ -116,6 +126,7 @@ class Server {
   void Close() { acceptor_.close(); }
 
  private:
+  boost::asio::io_context& io_;
   boost::asio::ip::tcp::acceptor acceptor_;
   boost::asio::ip::tcp::endpoint endpoint_;
 };
