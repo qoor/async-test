@@ -1,10 +1,12 @@
-#ifndef ASYNC_TEST_TIMER_H_
-#define ASYNC_TEST_TIMER_H_
+#ifndef TEST_TEST_TIMER_H_
+#define TEST_TEST_TIMER_H_
 
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+
+#include "absl/strings/str_format.h"
 
 class TestTimer {
  public:
@@ -36,12 +38,12 @@ class TestAnalyzer {
     int64_t elapsed = timer.ElapsedInMilliseconds();
 
     test_times_[test_id].emplace_back(elapsed);
-    printf("%ldms\n\n", elapsed);
+    absl::PrintF("%dms\n\n", elapsed);
   }
 
   void PrintAll() {
     printf("=== total %ld tests results ===\n", test_times_.size());
-    for (int i = 0; i < test_times_.size(); ++i) {
+    for (uint32_t i = 0; i < test_times_.size(); ++i) {
       Print(i);
     }
     printf("===============================\n");
@@ -53,7 +55,15 @@ class TestAnalyzer {
       total += time;
     }
     total /= test_times_[test_id].size();
-    printf("test %d avg elapsed = %ldms\n", test_id, total);
+    absl::PrintF("test %d avg elapsed = %dms\n", test_id, total);
+
+    if (total == 0) {
+      return;
+    }
+
+    for (uint64_t i = 0; i < test_times_[test_id].size(); ++i) {
+      absl::PrintF(" - %d cycle = %dms\n", i + 1, test_times_[test_id][i]);
+    }
   }
 
   void SetNumTestCases(int num_test_cases) {
@@ -67,4 +77,4 @@ class TestAnalyzer {
   std::vector<std::vector<int64_t>> test_times_;
 };
 
-#endif  // ASYNC_TEST_TIMER_H_
+#endif  // TEST_TEST_TIMER_H_

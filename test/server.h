@@ -1,9 +1,8 @@
-#ifndef ASYNC_SERVER_H_
-#define ASYNC_SERVER_H_
+#ifndef TEST_SERVER_H_
+#define TEST_SERVER_H_
 
 #include <sys/socket.h>
 
-#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <exception>
@@ -17,7 +16,7 @@
 #include "boost/asio/ip/tcp.hpp"
 #include "boost/asio/read.hpp"
 
-bool LaunchClient(int num_clients);
+pid_t LaunchClient(int num_clients);
 
 class Session {
  public:
@@ -65,8 +64,7 @@ class Session {
 class Server {
  public:
   Server(boost::asio::io_context& io, int port)
-      : io_(io),
-        acceptor_(io),
+      : acceptor_(io),
         endpoint_(
             boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)) {}
 
@@ -76,11 +74,11 @@ class Server {
       for (int i = 0; i < clients; ++i) {
         printf("Waiting for client id: %d\n", i);
         sessions.emplace_back(Accept());
-        // sessions.emplace_back(Accept());
+        printf("Success to accept client id: %d\n", i);
       }
     });
 
-    if (!LaunchClient(clients)) {
+    if (LaunchClient(clients) <= 0) {
       printf("Failed to launch clients\n");
       sessions.clear();
     }
@@ -126,9 +124,8 @@ class Server {
   void Close() { acceptor_.close(); }
 
  private:
-  boost::asio::io_context& io_;
   boost::asio::ip::tcp::acceptor acceptor_;
   boost::asio::ip::tcp::endpoint endpoint_;
 };
 
-#endif  // ASYNC_SERVER_H_
+#endif  // TEST_SERVER_H_
