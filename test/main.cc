@@ -1,12 +1,9 @@
-#include <sys/wait.h>
-
 #include <cstdlib>
 #include <cstring>
 #include <future>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 #include "boost/asio/thread_pool.hpp"
@@ -241,28 +238,24 @@ void LibuvTcpPacketReadTest(int num_tcp_clients, std::string_view file_path) {
 
   TestTimer timer;  // test start
 
-  auto data1 = std::make_unique<std::string_view>(file_path);
-  std::unique_ptr<uv_work_t> work1 = MakeWork(data1);
-  uv_queue_work(loop, work1.get(), LibuvReadEntireFile, nullptr);
+  TestWork<std::string_view, int> work1(file_path);
+  uv_queue_work(loop, work1.req(), LibuvReadEntireFile, nullptr);
 
-  auto data2 = std::make_unique<int>(1);
-  std::unique_ptr<uv_work_t> work2 = MakeWork(data1);
-  uv_queue_work(loop, work2.get(), LibuvDelayedSum, nullptr);
+  TestWork<int, int> work2(1);
+  uv_queue_work(loop, work2.req(), LibuvDelayedSum, nullptr);
 
-  std::vector<std::unique_ptr<uv_work_t>> work3;
+  std::vector<std::unique_ptr<TestWork<Session*, int>>> work3;
   for (std::unique_ptr<Session>& session : session_list) {
-    std::unique_ptr<uv_work_t> work = MakeWork(session);
-    std::unique_ptr<uv_work_t>& data = work3.emplace_back(std::move(work));
-    uv_queue_work(loop, data.get(), LibuvReadPacketFromSession, nullptr);
+    std::unique_ptr<TestWork<Session*, int>>& work = work3.emplace_back(
+        std::make_unique<TestWork<Session*, int>>(session.get()));
+    uv_queue_work(loop, work->req(), LibuvReadPacketFromSession, nullptr);
   }
 
-  auto data4 = std::make_unique<std::string_view>(file_path);
-  std::unique_ptr<uv_work_t> work4 = MakeWork(data4);
-  uv_queue_work(loop, work4.get(), LibuvReadEntireFile, nullptr);
+  TestWork<std::string_view, int> work4(file_path);
+  uv_queue_work(loop, work4.req(), LibuvReadEntireFile, nullptr);
 
-  auto data5 = std::make_unique<int>(90001);
-  std::unique_ptr<uv_work_t> work5 = MakeWork(data5);
-  uv_queue_work(loop, work5.get(), LibuvDelayedSum, nullptr);
+  TestWork<int, int> work5(90001);
+  uv_queue_work(loop, work5.req(), LibuvDelayedSum, nullptr);
 
   uv_run(loop, UV_RUN_DEFAULT);
 
